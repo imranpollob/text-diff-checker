@@ -1,13 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-  <rect width="32" height="32" rx="6" fill="#1e293b"/>
+  <rect width="32" height="32" rx="6" fill="#042f2e" />
   <!-- Left removed indicator (red) -->
-  <rect x="4" y="8" width="10" height="3" rx="1.5" fill="#f87171"/>
-  <rect x="4" y="14" width="10" height="3" rx="1.5" fill="#f87171"/>
-  <rect x="4" y="20" width="7" height="3" rx="1.5" fill="#f87171"/>
+  <rect x="4" y="8" width="10" height="3" rx="1.5" fill="#f87171" />
+  <rect x="4" y="14" width="10" height="3" rx="1.5" fill="#f87171" />
+  <rect x="4" y="20" width="7" height="3" rx="1.5" fill="#f87171" />
   <!-- Divider -->
-  <line x1="16" y1="6" x2="16" y2="26" stroke="#475569" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="16" y1="6" x2="16" y2="26" stroke="#0f766e" stroke-width="1.5" stroke-linecap="round" />
   <!-- Right added indicator (green) -->
-  <rect x="18" y="8" width="10" height="3" rx="1.5" fill="#4ade80"/>
-  <rect x="18" y="14" width="10" height="3" rx="1.5" fill="#4ade80"/>
-  <rect x="21" y="20" width="7" height="3" rx="1.5" fill="#4ade80"/>
+  <rect x="18" y="8" width="10" height="3" rx="1.5" fill="#4ade80" />
+  <rect x="18" y="14" width="10" height="3" rx="1.5" fill="#4ade80" />
+  <rect x="21" y="20" width="7" height="3" rx="1.5" fill="#4ade80" />
 </svg>
