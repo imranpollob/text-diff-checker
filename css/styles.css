@@ -312,6 +312,24 @@ body {
   color: var(--text-primary);
 }
 
+/* Tools launcher toggle: match .btn-icon */
+.header-actions .bl-toggle {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  transition: all var(--transition);
+}
+
+.header-actions .bl-toggle:hover,
+.header-actions .bl-toggle[aria-expanded="true"] {
+  background-color: var(--bg-inset);
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+
 /* Main Container */
 .main-content {
   max-width: 1600px;
