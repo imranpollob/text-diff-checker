@@ -557,6 +557,37 @@
 
   DiffEngine.applyLineRangeEdit = applyLineRangeEdit;
 
+  /**
+   * Line range strictly above a 1-based cursor line, for "delete all above".
+   *
+   * @returns {{ startLine: number, endLine: number }|null} Null when there is
+   *          nothing above the cursor line.
+   */
+  function deleteAboveRange(cursorLine) {
+    const c = Math.floor(cursorLine);
+    if (!Number.isFinite(c) || c <= 1) return null;
+    return { startLine: 1, endLine: c - 1 };
+  }
+
+  DiffEngine.deleteAboveRange = deleteAboveRange;
+
+  /**
+   * Line range strictly below a 1-based cursor line, for "delete all below".
+   *
+   * @param {number} cursorLine - 1-based cursor line
+   * @param {number} totalLines - Total line count of the text
+   * @returns {{ startLine: number, endLine: number }|null} Null when there is
+   *          nothing below the cursor line.
+   */
+  function deleteBelowRange(cursorLine, totalLines) {
+    const c = Math.floor(cursorLine);
+    const total = Math.floor(totalLines);
+    if (!Number.isFinite(c) || !Number.isFinite(total) || c < 1 || c >= total) return null;
+    return { startLine: c + 1, endLine: total };
+  }
+
+  DiffEngine.deleteBelowRange = deleteBelowRange;
+
   // Export to global / window or module
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = DiffEngine;

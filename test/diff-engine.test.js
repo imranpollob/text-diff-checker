@@ -220,4 +220,36 @@ console.log('Running DiffEngine test suite...\n');
   console.log('✓ Test 10 Passed: applyLineRangeEdit replacements, deletions, and clamping');
 }
 
-console.log('\nAll 10 DiffEngine tests passed successfully! 🎉');
+// Test 11: delete-above/below line ranges and their composition with edits
+{
+  const above = DiffEngine.deleteAboveRange;
+  const below = DiffEngine.deleteBelowRange;
+  const apply = DiffEngine.applyLineRangeEdit;
+
+  assert.deepStrictEqual(above(1), null);
+  assert.deepStrictEqual(above(0), null);
+  assert.deepStrictEqual(above(4), { startLine: 1, endLine: 3 });
+
+  assert.deepStrictEqual(below(5, 5), null);
+  assert.deepStrictEqual(below(0, 5), null);
+  assert.deepStrictEqual(below(2, 5), { startLine: 3, endLine: 5 });
+  assert.deepStrictEqual(below(6, 5), null);
+
+  // Composed deletes remove whole lines with no stray blank line left behind
+  assert.deepStrictEqual(
+    apply('a\nb\nc\nd', 1, 3, 0, 0, ''),
+    { text: 'c\nd', ok: true }
+  );
+  assert.deepStrictEqual(
+    apply('a\nb\nc\nd', 2, 4, 1, 1, ''),
+    { text: 'a\nb', ok: true }
+  );
+  // Insert is a zero-width replacement at the caret
+  assert.deepStrictEqual(
+    apply('ac', 1, 1, 1, 1, 'X'),
+    { text: 'aXc', ok: true }
+  );
+  console.log('✓ Test 11 Passed: delete-above/below ranges and caret compositions');
+}
+
+console.log('\nAll 11 DiffEngine tests passed successfully! 🎉');

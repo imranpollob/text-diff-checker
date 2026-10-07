@@ -993,6 +993,27 @@ body {
   transform: translateY(0);
 }
 
+.toast-actionable {
+  pointer-events: auto;
+}
+
+.toast-undo-btn {
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  font-family: var(--font-family);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  padding: 1px 10px;
+  margin-left: 10px;
+  cursor: pointer;
+}
+
+.toast-undo-btn:hover {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
 /* Floating selection toolbar */
 .selection-toolbar {
   position: fixed;
@@ -1056,6 +1077,149 @@ body {
   height: 16px;
   background-color: var(--border-color);
   margin: 0 2px;
+}
+
+/* Simulated caret in the read-only diff panes */
+.diff-caret {
+  position: fixed;
+  z-index: 999;
+  width: 2px;
+  padding: 0;
+  border: none;
+  background-color: var(--color-primary);
+  pointer-events: none;
+  animation: diffCaretBlink 1.1s steps(2, start) infinite;
+}
+
+@keyframes diffCaretBlink {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* Caret action menu */
+.caret-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 210px;
+  padding: 4px;
+  background-color: var(--bg-surface-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.2);
+  user-select: none;
+  animation: caretMenuIn 0.12s ease-out;
+}
+
+@keyframes caretMenuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.caret-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--transition), color var(--transition);
+}
+
+.caret-menu-item:hover {
+  background-color: var(--bg-inset);
+  color: var(--primary);
+}
+
+.caret-menu-item-danger {
+  color: var(--accent-del-text);
+}
+
+.caret-menu-item-danger:hover {
+  background-color: var(--accent-del-bg);
+  color: var(--accent-del-text);
+}
+
+.caret-menu-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.caret-menu-item:disabled:hover {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.caret-menu-item-danger:disabled:hover {
+  color: var(--accent-del-text);
+}
+
+/* Inline delete confirm inside the caret menu */
+.caret-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  min-width: 230px;
+}
+
+.caret-confirm-text {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.45;
+}
+
+.caret-confirm-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.caret-confirm-btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-family: var(--font-family);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.caret-confirm-btn:hover {
+  background-color: var(--bg-inset);
+  color: var(--text-primary);
+}
+
+.caret-confirm-btn-danger {
+  background-color: var(--accent-del);
+  border-color: transparent;
+  color: #ffffff;
+}
+
+.caret-confirm-btn-danger:hover {
+  background-color: var(--accent-del);
+  color: #ffffff;
+  filter: brightness(0.92);
 }
 
 /* Centered modal overlay */
@@ -1177,7 +1341,12 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .selection-toolbar,
-  .replace-dialog {
+  .replace-dialog,
+  .caret-menu {
+    animation: none;
+  }
+
+  .diff-caret {
     animation: none;
   }
 }

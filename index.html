@@ -254,6 +254,44 @@
     </button>
   </div>
 
+  <!-- Diff caret + caret action menu -->
+  <div id="diffCaret" class="diff-caret" style="display: none;" aria-hidden="true"></div>
+  <div id="caretMenu" class="caret-menu" role="menu" aria-label="Caret actions" style="display: none;">
+    <div id="caretMenuItems">
+      <button id="caretInsertBtn" class="caret-menu-item" role="menuitem" title="Insert text at the caret">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+        <span>Insert…</span>
+      </button>
+      <button id="caretDeleteAboveBtn" class="caret-menu-item caret-menu-item-danger" role="menuitem"
+        title="Delete all lines above the caret line">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="19" x2="12" y2="5"></line>
+          <polyline points="5 12 12 5 19 12"></polyline>
+        </svg>
+        <span id="caretDeleteAboveLabel">Delete all above</span>
+      </button>
+      <button id="caretDeleteBelowBtn" class="caret-menu-item caret-menu-item-danger" role="menuitem"
+        title="Delete all lines below the caret line">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <polyline points="19 12 12 19 5 12"></polyline>
+        </svg>
+        <span id="caretDeleteBelowLabel">Delete all below</span>
+      </button>
+    </div>
+    <div id="caretConfirmBox" class="caret-confirm" style="display: none;">
+      <div id="caretConfirmText" class="caret-confirm-text"></div>
+      <div class="caret-confirm-actions">
+        <button id="caretConfirmCancelBtn" class="caret-confirm-btn" title="Keep everything (Esc)">Cancel</button>
+        <button id="caretConfirmDeleteBtn" class="caret-confirm-btn caret-confirm-btn-danger"
+          title="Delete the lines">Delete</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Centered replace dialog -->
   <div id="modalOverlay" class="modal-overlay" style="display: none;">
     <div id="replaceDialog" class="replace-dialog" role="dialog" aria-modal="true"

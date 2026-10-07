@@ -56,11 +56,32 @@
   const cancelReplaceDialogBtn = document.getElementById('cancelReplaceDialogBtn');
   const confirmReplaceDialogBtn = document.getElementById('confirmReplaceDialogBtn');
 
+  // Caret & caret menu elements
+  const diffCaret = document.getElementById('diffCaret');
+  const caretMenu = document.getElementById('caretMenu');
+  const caretMenuItems = document.getElementById('caretMenuItems');
+  const caretInsertBtn = document.getElementById('caretInsertBtn');
+  const caretDeleteAboveBtn = document.getElementById('caretDeleteAboveBtn');
+  const caretDeleteBelowBtn = document.getElementById('caretDeleteBelowBtn');
+  const caretDeleteAboveLabel = document.getElementById('caretDeleteAboveLabel');
+  const caretDeleteBelowLabel = document.getElementById('caretDeleteBelowLabel');
+  const caretConfirmBox = document.getElementById('caretConfirmBox');
+  const caretConfirmText = document.getElementById('caretConfirmText');
+  const caretConfirmCancelBtn = document.getElementById('caretConfirmCancelBtn');
+  const caretConfirmDeleteBtn = document.getElementById('caretConfirmDeleteBtn');
+
   // Application State
   let activeMode = 'word'; // 'word' | 'char'
   let cachedDiff = null;
   let pendingSelection = null; // resolved in-diff selection behind the toolbar
   let activeEdit = null; // snapshot being edited in the replace dialog
+  let modalMode = null; // 'replace' | 'insert' while the modal is open
+  let modalCaret = null; // caret snapshot for insert mode { pane, line, char }
+  let pendingCaret = null; // caret behind the caret menu { pane, line, char }
+  let caretAnchor = null; // viewport anchor for menu positioning { x, top, bottom }
+  let confirmDirection = null; // 'above' | 'below' while the confirm box shows
+  let undoSnapshot = null; // { pane, value } for single-level undo of mass deletes
+  let toastTimer = null;
 
   // Sample data designed to showcase Word vs Char diff, Wrap Lines, Blank lines, Whitespace, and Case settings
   const SAMPLE_ORIGINAL = `// Diffchecker Feature Showcase v1.0.0
@@ -136,6 +157,7 @@ const documentationNotice = "The billing service processes all transactions thro
     initTheme();
     bindEvents();
     bindSelectionToolbar();
+    bindCaretMenu();
     updateInputStats();
     updateWrapClass();
   }
@@ -245,7 +267,7 @@ const documentationNotice = "The billing service processes all transactions thro
 
     // Hide as soon as the selection stops being a valid in-diff selection
     document.addEventListener('selectionchange', () => {
-      if (isReplaceDialogOpen()) return;
+      if (isModalOpen()) return;
       if (selectionToolbar.style.display === 'none') return;
       if (!getDiffSelectionInfo()) hideSelectionToolbar();
     });
@@ -259,42 +281,55 @@ const documentationNotice = "The billing service processes all transactions thro
     selectionReplaceBtn.addEventListener('click', openReplaceDialog);
     selectionDeleteBtn.addEventListener('click', deletePendingSelection);
 
-    closeReplaceDialogBtn.addEventListener('click', closeReplaceDialog);
-    cancelReplaceDialogBtn.addEventListener('click', closeReplaceDialog);
-    confirmReplaceDialogBtn.addEventListener('click', confirmReplaceDialog);
+    closeReplaceDialogBtn.addEventListener('click', closeModal);
+    cancelReplaceDialogBtn.addEventListener('click', closeModal);
+    confirmReplaceDialogBtn.addEventListener('click', confirmModal);
     modalOverlay.addEventListener('mousedown', (e) => {
-      if (e.target === modalOverlay) closeReplaceDialog();
+      if (e.target === modalOverlay) closeModal();
     });
 
     replaceDialogInput.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
-        confirmReplaceDialog();
+        confirmModal();
       }
     });
 
     // Dismiss the toolbar on outside click, Escape, scroll, or resize
     document.addEventListener('mousedown', (e) => {
-      if (selectionToolbar.style.display === 'none') return;
-      if (selectionToolbar.contains(e.target) || diffOutput.contains(e.target)) return;
+      const toolbarOpen = selectionToolbar.style.display !== 'none';
+      const menuOpen = caretMenu.style.display !== 'none';
+      if (!toolbarOpen && !menuOpen) return;
+      if (selectionToolbar.contains(e.target) || caretMenu.contains(e.target) || diffOutput.contains(e.target)) return;
       hideSelectionToolbar();
+      hideCaretMenu();
     });
 
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
-      if (isReplaceDialogOpen()) {
-        closeReplaceDialog();
+      if (isModalOpen()) {
+        closeModal();
+      } else if (caretMenu.style.display !== 'none' && confirmDirection) {
+        backToCaretItems();
       } else {
         hideSelectionToolbar();
+        hideCaretMenu();
       }
     });
 
     window.addEventListener('scroll', hideSelectionToolbar, { passive: true, capture: true });
     window.addEventListener('resize', hideSelectionToolbar);
+    window.addEventListener('scroll', hideCaretMenu, { passive: true, capture: true });
+    window.addEventListener('resize', hideCaretMenu);
   }
 
-  function evaluateDiffSelection() {
-    if (isReplaceDialogOpen()) return;
+  function evaluateDiffSelection(e) {
+    if (isModalOpen()) return;
+    // Events from inside either popup must not re-evaluate: mouseup fires
+    // before click, and re-evaluating here would clear the caret snapshot
+    // (the selection is collapsed in caret mode) before the click runs.
+    if (e && e.target && (caretMenu.contains(e.target) || selectionToolbar.contains(e.target))) return;
+    hideCaretMenu(); // caret and selection modes are mutually exclusive
     const info = getDiffSelectionInfo();
     if (!info) {
       hideSelectionToolbar();
@@ -560,21 +595,23 @@ const documentationNotice = "The billing service processes all transactions thro
     showToast(`Deleted ${count} character${count === 1 ? '' : 's'} from ${label}`);
   }
 
-  function isReplaceDialogOpen() {
+  function isModalOpen() {
     return modalOverlay.style.display !== 'none';
   }
 
-  function openReplaceDialog() {
-    if (!pendingSelection) return;
-    activeEdit = pendingSelection;
+  // Configured modal shell shared by Replace and Insert. Element ids keep
+  // their replace-era names; only title, meta, placeholder, confirm label,
+  // and the confirm behavior vary per mode.
+  function openModal(config) {
+    modalMode = config.mode;
     hideSelectionToolbar();
+    hideCaretMenu();
 
-    replaceDialogTitle.textContent = activeEdit.pane === 'original' ? 'Replace in Original' : 'Replace in Changed';
-    const linesLabel = activeEdit.startLine === activeEdit.endLine
-      ? `Line ${activeEdit.startLine}`
-      : `Lines ${activeEdit.startLine}–${activeEdit.endLine}`;
-    replaceDialogMeta.textContent = `${linesLabel} · ${activeEdit.text.length} characters selected`;
-    replaceDialogInput.value = activeEdit.text;
+    replaceDialogTitle.textContent = config.title;
+    replaceDialogMeta.textContent = config.meta;
+    replaceDialogInput.value = config.initialText || '';
+    replaceDialogInput.placeholder = config.placeholder || '';
+    confirmReplaceDialogBtn.textContent = config.confirmLabel;
 
     modalOverlay.style.display = 'flex';
     document.body.style.overflow = 'hidden';
@@ -582,15 +619,44 @@ const documentationNotice = "The billing service processes all transactions thro
     replaceDialogInput.select();
   }
 
-  function closeReplaceDialog() {
+  function closeModal() {
     modalOverlay.style.display = 'none';
     document.body.style.overflow = '';
+    modalMode = null;
     activeEdit = null;
+    modalCaret = null;
   }
 
-  function confirmReplaceDialog() {
+  function confirmModal() {
+    if (modalMode === 'replace') {
+      confirmReplace();
+    } else if (modalMode === 'insert') {
+      confirmInsert();
+    } else {
+      closeModal();
+    }
+  }
+
+  function openReplaceDialog() {
+    if (!pendingSelection) return;
+    activeEdit = pendingSelection;
+
+    const label = activeEdit.pane === 'original' ? 'Original' : 'Changed';
+    const linesLabel = activeEdit.startLine === activeEdit.endLine
+      ? `Line ${activeEdit.startLine}`
+      : `Lines ${activeEdit.startLine}–${activeEdit.endLine}`;
+    openModal({
+      mode: 'replace',
+      title: `Replace in ${label}`,
+      meta: `${linesLabel} · ${activeEdit.text.length} characters selected`,
+      initialText: activeEdit.text,
+      confirmLabel: 'Replace'
+    });
+  }
+
+  function confirmReplace() {
     if (!activeEdit) {
-      closeReplaceDialog();
+      closeModal();
       return;
     }
     const targetInput = activeEdit.pane === 'original' ? originalInput : changedInput;
@@ -606,7 +672,7 @@ const documentationNotice = "The billing service processes all transactions thro
     );
 
     if (!result.ok) {
-      closeReplaceDialog();
+      closeModal();
       showToast('Could not replace — please re-select and try again');
       return;
     }
@@ -614,9 +680,266 @@ const documentationNotice = "The billing service processes all transactions thro
     targetInput.value = result.text;
     updateInputStats();
     invalidateCache();
-    closeReplaceDialog();
+    closeModal();
     performDiff();
     showToast(`Replaced in ${label} text`);
+  }
+
+  // Click-to-caret + caret action menu (Insert / Delete all above / Delete all below)
+  function bindCaretMenu() {
+    // A click with a collapsed selection places the caret. Drags either skip
+    // click (press/release in different elements) or arrive non-collapsed.
+    diffOutput.addEventListener('click', (e) => {
+      if (isModalOpen()) return;
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0 && !selection.isCollapsed) return;
+      placeCaretAtPoint(e.clientX, e.clientY);
+    });
+
+    caretInsertBtn.addEventListener('click', openInsertDialog);
+    caretDeleteAboveBtn.addEventListener('click', () => askDeleteConfirm('above'));
+    caretDeleteBelowBtn.addEventListener('click', () => askDeleteConfirm('below'));
+    caretConfirmCancelBtn.addEventListener('click', backToCaretItems);
+    caretConfirmDeleteBtn.addEventListener('click', executeDeleteAboveBelow);
+  }
+
+  function placeCaretAtPoint(x, y) {
+    let range = null;
+    if (typeof document.caretRangeFromPoint === 'function') {
+      try {
+        range = document.caretRangeFromPoint(x, y);
+      } catch (err) {
+        range = null;
+      }
+    }
+    if (!range) {
+      hideCaretMenu();
+      return;
+    }
+
+    const lineEl = getDiffLineElement(range.startContainer, range.startOffset, false);
+    if (!lineEl) {
+      hideCaretMenu();
+      return;
+    }
+
+    const pane = lineEl.dataset.pane;
+    const line = parseInt(lineEl.dataset.lineNum, 10);
+    if (!pane || !Number.isFinite(line)) {
+      hideCaretMenu();
+      return;
+    }
+
+    const targetInput = pane === 'original' ? originalInput : changedInput;
+    if (line < 1 || line > targetInput.value.split('\n').length) {
+      hideCaretMenu();
+      return;
+    }
+
+    pendingCaret = {
+      pane,
+      line,
+      char: getBoundaryOffset(lineEl, range.startContainer, range.startOffset)
+    };
+
+    const rect = range.getBoundingClientRect();
+    caretAnchor = rect.height === 0
+      ? { x, top: y - 9, bottom: y + 9 }
+      : { x: rect.left, top: rect.top, bottom: rect.bottom };
+
+    showCaret();
+    showCaretMenu();
+  }
+
+  function showCaret() {
+    diffCaret.style.display = 'block';
+    diffCaret.style.left = `${caretAnchor.x - 1}px`;
+    diffCaret.style.top = `${caretAnchor.top}px`;
+    diffCaret.style.height = `${Math.max(caretAnchor.bottom - caretAnchor.top, 10)}px`;
+  }
+
+  function showCaretMenu() {
+    if (!pendingCaret) return;
+    const targetInput = pendingCaret.pane === 'original' ? originalInput : changedInput;
+    const totalLines = targetInput.value.split('\n').length;
+    const above = DiffEngine.deleteAboveRange(pendingCaret.line);
+    const below = DiffEngine.deleteBelowRange(pendingCaret.line, totalLines);
+
+    if (above) {
+      const n = above.endLine - above.startLine + 1;
+      caretDeleteAboveLabel.textContent = `Delete ${n} line${n === 1 ? '' : 's'} above`;
+      caretDeleteAboveBtn.disabled = false;
+    } else {
+      caretDeleteAboveLabel.textContent = 'Delete all above';
+      caretDeleteAboveBtn.disabled = true;
+    }
+    if (below) {
+      const n = below.endLine - below.startLine + 1;
+      caretDeleteBelowLabel.textContent = `Delete ${n} line${n === 1 ? '' : 's'} below`;
+      caretDeleteBelowBtn.disabled = false;
+    } else {
+      caretDeleteBelowLabel.textContent = 'Delete all below';
+      caretDeleteBelowBtn.disabled = true;
+    }
+
+    backToCaretItems();
+    caretMenu.style.display = 'block';
+    positionCaretMenu();
+  }
+
+  function positionCaretMenu() {
+    if (!caretAnchor) return;
+    const rect = caretMenu.getBoundingClientRect();
+    const width = rect.width || 230;
+    const height = rect.height || 140;
+
+    let left = caretAnchor.x + 6;
+    let top = caretAnchor.bottom + 6;
+    if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
+    if (left < 8) left = 8;
+    if (top + height > window.innerHeight - 8) top = caretAnchor.top - height - 6;
+    if (top < 8) top = 8;
+
+    caretMenu.style.left = `${left}px`;
+    caretMenu.style.top = `${top}px`;
+  }
+
+  function hideCaretMenu() {
+    caretMenu.style.display = 'none';
+    diffCaret.style.display = 'none';
+    pendingCaret = null;
+    caretAnchor = null;
+    confirmDirection = null;
+  }
+
+  function askDeleteConfirm(direction) {
+    if (!pendingCaret) return;
+    const targetInput = pendingCaret.pane === 'original' ? originalInput : changedInput;
+    const totalLines = targetInput.value.split('\n').length;
+    const range = direction === 'above'
+      ? DiffEngine.deleteAboveRange(pendingCaret.line)
+      : DiffEngine.deleteBelowRange(pendingCaret.line, totalLines);
+    if (!range) return; // disabled buttons never reach here; guard anyway
+
+    confirmDirection = direction;
+    const n = range.endLine - range.startLine + 1;
+    caretConfirmText.textContent = `Delete ${n} line${n === 1 ? '' : 's'} ${direction} line ${pendingCaret.line}?`;
+    caretMenuItems.style.display = 'none';
+    caretConfirmBox.style.display = 'flex';
+    positionCaretMenu();
+  }
+
+  function backToCaretItems() {
+    confirmDirection = null;
+    caretConfirmBox.style.display = 'none';
+    caretMenuItems.style.display = 'block';
+    if (caretMenu.style.display !== 'none') positionCaretMenu();
+  }
+
+  function executeDeleteAboveBelow() {
+    if (!pendingCaret || !confirmDirection) {
+      hideCaretMenu();
+      return;
+    }
+    const direction = confirmDirection;
+    const caret = pendingCaret;
+    const targetInput = caret.pane === 'original' ? originalInput : changedInput;
+    const label = caret.pane === 'original' ? 'Original' : 'Changed';
+    const before = targetInput.value;
+    const lines = before.split('\n');
+
+    if (caret.line < 1 || caret.line > lines.length) {
+      hideCaretMenu();
+      showToast('Could not delete — please click again and retry');
+      return;
+    }
+
+    let result;
+    let count;
+    if (direction === 'above') {
+      const range = DiffEngine.deleteAboveRange(caret.line);
+      if (!range) {
+        hideCaretMenu();
+        return;
+      }
+      count = range.endLine - range.startLine + 1;
+      // Delete lines 1..cursor-1, keeping the cursor line intact.
+      result = DiffEngine.applyLineRangeEdit(before, range.startLine, caret.line, 0, 0, '');
+    } else {
+      const range = DiffEngine.deleteBelowRange(caret.line, lines.length);
+      if (!range) {
+        hideCaretMenu();
+        return;
+      }
+      count = range.endLine - range.startLine + 1;
+      // Delete lines cursor+1..N, keeping the cursor line intact.
+      result = DiffEngine.applyLineRangeEdit(before, caret.line, range.endLine, lines[caret.line - 1].length, lines[range.endLine - 1].length, '');
+    }
+
+    if (!result.ok) {
+      hideCaretMenu();
+      showToast('Could not delete — please click again and retry');
+      return;
+    }
+
+    targetInput.value = result.text;
+    updateInputStats();
+    invalidateCache();
+    hideCaretMenu();
+    performDiff();
+    showUndoToast(`Deleted ${count} line${count === 1 ? '' : 's'} ${direction} line ${caret.line} in ${label}`, { pane: caret.pane, value: before });
+  }
+
+  function openInsertDialog() {
+    if (!pendingCaret) return;
+    modalCaret = pendingCaret;
+
+    const label = modalCaret.pane === 'original' ? 'Original' : 'Changed';
+    openModal({
+      mode: 'insert',
+      title: `Insert in ${label}`,
+      meta: `Line ${modalCaret.line}`,
+      initialText: '',
+      placeholder: 'Type text to insert…',
+      confirmLabel: 'Insert'
+    });
+  }
+
+  function confirmInsert() {
+    if (!modalCaret) {
+      closeModal();
+      return;
+    }
+    const targetInput = modalCaret.pane === 'original' ? originalInput : changedInput;
+    const label = modalCaret.pane === 'original' ? 'Original' : 'Changed';
+    const text = replaceDialogInput.value;
+
+    if (!text) {
+      closeModal();
+      return;
+    }
+
+    const result = DiffEngine.applyLineRangeEdit(
+      targetInput.value,
+      modalCaret.line,
+      modalCaret.line,
+      modalCaret.char,
+      modalCaret.char,
+      text
+    );
+
+    if (!result.ok) {
+      closeModal();
+      showToast('Could not insert — please click again and retry');
+      return;
+    }
+
+    targetInput.value = result.text;
+    updateInputStats();
+    invalidateCache();
+    closeModal();
+    performDiff();
+    showToast(`Inserted ${text.length} character${text.length === 1 ? '' : 's'} in ${label}`);
   }
 
   function updateInputStats() {
@@ -640,6 +963,7 @@ const documentationNotice = "The billing service processes all transactions thro
     resultsHeader.style.display = 'none';
     diffOutput.innerHTML = '';
     hideSelectionToolbar();
+    hideCaretMenu();
   }
 
   function switchMode(mode) {
@@ -724,11 +1048,51 @@ const documentationNotice = "The billing service processes all transactions thro
   }
 
   function showToast(message) {
+    undoSnapshot = null;
+    if (toastTimer) clearTimeout(toastTimer);
+    toast.classList.remove('toast-actionable');
     toast.textContent = message;
     toast.classList.add('show');
-    setTimeout(() => {
+    toastTimer = setTimeout(() => {
       toast.classList.remove('show');
     }, 2200);
+  }
+
+  function showUndoToast(message, snapshot) {
+    undoSnapshot = snapshot;
+    if (toastTimer) clearTimeout(toastTimer);
+    toast.textContent = '';
+    toast.classList.add('toast-actionable');
+    const label = document.createElement('span');
+    label.textContent = message;
+    const undoBtn = document.createElement('button');
+    undoBtn.type = 'button';
+    undoBtn.className = 'toast-undo-btn';
+    undoBtn.textContent = 'Undo';
+    undoBtn.addEventListener('click', undoLastDestructiveEdit);
+    toast.appendChild(label);
+    toast.appendChild(document.createTextNode(' '));
+    toast.appendChild(undoBtn);
+    toast.classList.add('show');
+    toastTimer = setTimeout(() => {
+      toast.classList.remove('show');
+      toast.classList.remove('toast-actionable');
+      undoSnapshot = null;
+    }, 6000);
+  }
+
+  function undoLastDestructiveEdit() {
+    if (!undoSnapshot) return;
+    const targetInput = undoSnapshot.pane === 'original' ? originalInput : changedInput;
+    targetInput.value = undoSnapshot.value;
+    undoSnapshot = null;
+    if (toastTimer) clearTimeout(toastTimer);
+    toast.classList.remove('show');
+    toast.classList.remove('toast-actionable');
+    updateInputStats();
+    invalidateCache();
+    performDiff();
+    showToast('Undone');
   }
 
   function getOptions() {
@@ -742,7 +1106,8 @@ const documentationNotice = "The billing service processes all transactions thro
 
   // Perform Diff Computation
   function performDiff() {
-    hideSelectionToolbar(); // rendered nodes (and any resolved range) are about to be replaced
+    hideSelectionToolbar();
+    hideCaretMenu(); // rendered nodes (and any resolved range) are about to be replaced
     const textA = originalInput.value;
     const textB = changedInput.value;
 
@@ -769,7 +1134,8 @@ const documentationNotice = "The billing service processes all transactions thro
   }
 
   function renderActiveView() {
-    hideSelectionToolbar(); // rendered nodes (and any resolved range) are about to be replaced
+    hideSelectionToolbar();
+    hideCaretMenu(); // rendered nodes (and any resolved range) are about to be replaced
     if (!cachedDiff) {
       performDiff();
       return;

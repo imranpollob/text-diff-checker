@@ -10,6 +10,7 @@ A simple, fast, and private text comparison tool that runs entirely in your brow
 - **Word & Character Diff**: Choose between word-level or character-level difference highlighting.
 - **Contiguous Highlighting**: Merges adjacent additions and removals into clean, readable blocks.
 - **In-Diff Selection Actions**: Select text in either diff pane to **Copy**, **Replace** (centered dialog), or **Delete** with automatic re-diffing.
+- **Caret Actions**: Click anywhere in a diff pane to place a caret, then **Insert** text at that spot or **Delete all lines above/below** with confirm and undo.
 - **Editor Helpers**: Copy, paste, and clear buttons on each input pane, swap texts, and sample data loader.
 - **Diff Options**:
   - Wrap lines (enabled by default)
