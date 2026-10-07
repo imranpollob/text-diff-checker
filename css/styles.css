@@ -330,6 +330,37 @@ body {
   border-color: var(--border-color);
 }
 
+/* Header text button: match .btn-icon height */
+.btn-header {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  height: 36px;
+  padding: 0 0.875rem;
+  border-radius: var(--radius-md);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-family: var(--font-family);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.btn-header:hover {
+  background-color: var(--bg-inset);
+  border-color: var(--brand-400);
+  color: var(--primary);
+}
+
+@media (max-width: 560px) {
+  .brand-title {
+    display: none;
+  }
+}
+
 /* Main Container */
 .main-content {
   max-width: 1600px;

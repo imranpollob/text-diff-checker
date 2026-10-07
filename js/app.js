@@ -743,9 +743,15 @@ const documentationNotice = "The billing service processes all transactions thro
     };
 
     const rect = range.getBoundingClientRect();
-    caretAnchor = rect.height === 0
-      ? { x, top: y - 9, bottom: y + 9 }
-      : { x: rect.left, top: rect.top, bottom: rect.bottom };
+    if (rect.height === 0) {
+      // Resolved to a line but produced no caret geometry (an empty line).
+      // Anchor to the line content start so every click there shows one position.
+      const lineRect = lineEl.getBoundingClientRect();
+      const padLeft = parseFloat(window.getComputedStyle(lineEl).paddingLeft) || 0;
+      caretAnchor = { x: lineRect.left + padLeft, top: lineRect.top, bottom: lineRect.bottom };
+    } else {
+      caretAnchor = { x: rect.left, top: rect.top, bottom: rect.bottom };
+    }
 
     showCaret();
     showCaretMenu();
@@ -898,7 +904,7 @@ const documentationNotice = "The billing service processes all transactions thro
     openModal({
       mode: 'insert',
       title: `Insert in ${label}`,
-      meta: `Line ${modalCaret.line}`,
+      meta: `Line ${modalCaret.line} · Position ${modalCaret.char + 1}`,
       initialText: '',
       placeholder: 'Type text to insert…',
       confirmLabel: 'Insert'
@@ -1196,7 +1202,7 @@ const documentationNotice = "The billing service processes all transactions thro
         leftRowsHtml += `
           <div class="diff-row ${rowClass}">
             <div class="diff-gutter">${row.left.lineNum}</div>
-            <div class="diff-line-content" data-pane="original" data-line-num="${row.left.lineNum}">${row.left.html || ' '}</div>
+            <div class="diff-line-content" data-pane="original" data-line-num="${row.left.lineNum}">${row.left.html}</div>
           </div>
         `;
       } else {
@@ -1214,7 +1220,7 @@ const documentationNotice = "The billing service processes all transactions thro
         rightRowsHtml += `
           <div class="diff-row ${rowClass}">
             <div class="diff-gutter">${row.right.lineNum}</div>
-            <div class="diff-line-content" data-pane="changed" data-line-num="${row.right.lineNum}">${row.right.html || ' '}</div>
+            <div class="diff-line-content" data-pane="changed" data-line-num="${row.right.lineNum}">${row.right.html}</div>
           </div>
         `;
       } else {

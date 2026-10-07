@@ -32,6 +32,7 @@
         <span class="brand-title">Diffchecker</span>
       </a>
       <div class="header-actions">
+        <button id="sampleBtn" class="btn-header" title="Load sample comparison">Try Sample</button>
         <a href="https://github.com/imranpollob/diffchecker" target="_blank" rel="noopener noreferrer" class="btn-icon"
           title="View on GitHub" aria-label="GitHub Repository">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
@@ -171,8 +172,14 @@
           <span>Ignore Case</span>
         </label>
 
-        <button id="sampleBtn" class="btn-secondary" title="Load sample comparison">Sample</button>
-        <button id="clearAllBtn" class="btn-secondary" title="Clear all text inputs">Clear All</button>
+        <button id="clearAllBtn" class="btn-secondary" title="Clear all text inputs">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+          Clear All
+        </button>
       </div>
     </section>
 
@@ -263,7 +270,7 @@
           <line x1="12" y1="5" x2="12" y2="19"></line>
           <line x1="5" y1="12" x2="19" y2="12"></line>
         </svg>
-        <span>Insert…</span>
+        <span>Insert text here</span>
       </button>
       <button id="caretDeleteAboveBtn" class="caret-menu-item caret-menu-item-danger" role="menuitem"
         title="Delete all lines above the caret line">
