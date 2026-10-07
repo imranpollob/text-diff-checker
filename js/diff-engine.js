@@ -28,16 +28,38 @@
   /**
    * Tokenizers
    */
+  function isBlankLine(line) {
+    return line.trim() === '';
+  }
+
   function tokenizeLines(text, options = {}) {
     if (text === '') return [];
     // Normalize newlines and split into lines
     const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     let lines = normalized.split('\n');
     if (options.ignoreBlankLines) {
-      lines = lines.filter(line => line.trim() !== '');
+      lines = lines.filter(line => !isBlankLine(line));
     }
     return lines;
   }
+
+  /**
+   * Map each position of the blank-filtered line array back to its 0-based
+   * index in the original text, so rendered rows can resolve exact source
+   * lines even when blank lines are ignored. Must mirror tokenizeLines.
+   */
+  function sourceLineIndexMap(text) {
+    if (text === '') return [];
+    const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lines = normalized.split('\n');
+    const map = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (!isBlankLine(lines[i])) map.push(i);
+    }
+    return map;
+  }
+
+  DiffEngine.sourceLineIndexMap = sourceLineIndexMap;
 
   function tokenizeWords(text) {
     if (!text) return [];
@@ -306,10 +328,34 @@
   function computeLineDiff(textA, textB, options = {}) {
     const linesA = tokenizeLines(textA, options);
     const linesB = tokenizeLines(textB, options);
-    return myersDiff(linesA, linesB, options);
+    const edits = myersDiff(linesA, linesB, options);
+
+    // Annotate every edit with 0-based source line indices so rendered rows
+    // map back to exact input lines even when blank lines are filtered out.
+    const mapA = options.ignoreBlankLines ? sourceLineIndexMap(textA) : null;
+    const mapB = options.ignoreBlankLines ? sourceLineIndexMap(textB) : null;
+    for (const edit of edits) {
+      if (typeof edit.indexA === 'number') {
+        edit.srcIndexA = mapA ? mapA[edit.indexA] : edit.indexA;
+      }
+      if (typeof edit.indexB === 'number') {
+        edit.srcIndexB = mapB ? mapB[edit.indexB] : edit.indexB;
+      }
+    }
+    return edits;
   }
 
   DiffEngine.computeLineDiff = computeLineDiff;
+
+  /**
+   * Resolve the 1-based source line number for an edit side. Prefers the
+   * annotated source index (exact even when blank lines are filtered) and
+   * falls back to the running counter for unannotated edits.
+   */
+  function sourceLineNum(edit, key, fallback) {
+    const idx = edit ? edit[key] : undefined;
+    return typeof idx === 'number' ? idx + 1 : fallback;
+  }
 
   /**
    * Align line diff into Side-by-Side (Split) structure with intra-line word/char highlights.
@@ -328,16 +374,20 @@
       const edit = rawEdits[i];
 
       if (edit.type === 'equal') {
+        const leftNum = sourceLineNum(edit, 'srcIndexA', oldLineNum);
+        const rightNum = sourceLineNum(edit, 'srcIndexB', newLineNum);
+        oldLineNum = leftNum + 1;
+        newLineNum = rightNum + 1;
         rows.push({
           type: 'equal',
           left: {
-            lineNum: oldLineNum++,
+            lineNum: leftNum,
             content: edit.originalValue,
             html: escapeHtml(edit.originalValue),
             type: 'equal'
           },
           right: {
-            lineNum: newLineNum++,
+            lineNum: rightNum,
             content: edit.changedValue,
             html: escapeHtml(edit.changedValue),
             type: 'equal'
@@ -373,15 +423,20 @@
             const addVal = addBlock[j].value;
             const intra = computeIntraLineDiff(delVal, addVal, options);
 
+            const leftNum = sourceLineNum(delBlock[j], 'srcIndexA', oldLineNum);
+            const rightNum = sourceLineNum(addBlock[j], 'srcIndexB', newLineNum);
+            oldLineNum = leftNum + 1;
+            newLineNum = rightNum + 1;
+
             leftInfo = {
-              lineNum: oldLineNum++,
+              lineNum: leftNum,
               content: delVal,
               html: intra.delHtml,
               type: 'del',
               isModified: true
             };
             rightInfo = {
-              lineNum: newLineNum++,
+              lineNum: rightNum,
               content: addVal,
               html: intra.addHtml,
               type: 'add',
@@ -390,8 +445,10 @@
             rowType = 'modified';
           } else if (hasDel) {
             const delVal = delBlock[j].value;
+            const leftNum = sourceLineNum(delBlock[j], 'srcIndexA', oldLineNum);
+            oldLineNum = leftNum + 1;
             leftInfo = {
-              lineNum: oldLineNum++,
+              lineNum: leftNum,
               content: delVal,
               html: escapeHtml(delVal),
               type: 'del',
@@ -401,9 +458,11 @@
             rowType = 'del';
           } else if (hasAdd) {
             const addVal = addBlock[j].value;
+            const rightNum = sourceLineNum(addBlock[j], 'srcIndexB', newLineNum);
+            newLineNum = rightNum + 1;
             leftInfo = null;
             rightInfo = {
-              lineNum: newLineNum++,
+              lineNum: rightNum,
               content: addVal,
               html: escapeHtml(addVal),
               type: 'add',
@@ -450,6 +509,53 @@
   }
 
   DiffEngine.computeStats = computeStats;
+
+  /**
+   * Apply a line-range replacement to text (pure, bounds-checked).
+   *
+   * @param {string} text - Full original text ('\n'-separated lines)
+   * @param {number} startLine - 1-based start line
+   * @param {number} endLine - 1-based end line (must be >= startLine)
+   * @param {number} startChar - UTF-16 offset within the start line
+   * @param {number} endChar - UTF-16 offset within the end line
+   * @param {string} replacement - Replacement text (may contain newlines; '' deletes)
+   * @returns {{ text: string, ok: boolean }} New text, or ok:false with the
+   *          original text when the line range is invalid. Character offsets
+   *          are clamped to their line lengths.
+   */
+  function applyLineRangeEdit(text, startLine, endLine, startChar, endChar, replacement) {
+    const original = text === undefined || text === null ? '' : String(text);
+    const lines = original.split('\n');
+    const s = Math.floor(startLine);
+    const e = Math.floor(endLine);
+
+    if (!Number.isFinite(s) || !Number.isFinite(e) || s < 1 || e < s || e > lines.length) {
+      return { text: original, ok: false };
+    }
+
+    const clampChar = (value, len) => {
+      const n = Number.isFinite(value) ? Math.floor(value) : 0;
+      return Math.max(0, Math.min(n, len));
+    };
+    const rep = replacement === undefined || replacement === null ? '' : String(replacement);
+    const startIdx = s - 1;
+    const endIdx = e - 1;
+
+    if (startIdx === endIdx) {
+      const sc = clampChar(startChar, lines[startIdx].length);
+      const ec = Math.max(clampChar(endChar, lines[startIdx].length), sc);
+      lines[startIdx] = lines[startIdx].slice(0, sc) + rep + lines[startIdx].slice(ec);
+    } else {
+      const before = lines[startIdx].slice(0, clampChar(startChar, lines[startIdx].length));
+      const after = lines[endIdx].slice(clampChar(endChar, lines[endIdx].length));
+      const combined = before + rep + after;
+      lines.splice(startIdx, endIdx - startIdx + 1, ...combined.split('\n'));
+    }
+
+    return { text: lines.join('\n'), ok: true };
+  }
+
+  DiffEngine.applyLineRangeEdit = applyLineRangeEdit;
 
   // Export to global / window or module
   if (typeof module !== 'undefined' && module.exports) {

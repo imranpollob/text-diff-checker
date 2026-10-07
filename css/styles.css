@@ -196,14 +196,14 @@
 
 /* Neutral text selection inside textareas & diff cards to avoid color clashes */
 .diff-textarea::selection,
-.replace-textarea::selection,
+.replace-dialog-textarea::selection,
 .diff-card ::selection {
   background-color: #b4d5fe;
   color: #0f172a;
 }
 
 [data-theme="dark"] .diff-textarea::selection,
-[data-theme="dark"] .replace-textarea::selection,
+[data-theme="dark"] .replace-dialog-textarea::selection,
 [data-theme="dark"] .diff-card ::selection {
   background-color: #264f78;
   color: #ffffff;
@@ -993,19 +993,23 @@ body {
   transform: translateY(0);
 }
 
-/* Floating Diff Selection Tooltip & Replace Popover */
-.diff-selection-tooltip {
+/* Floating selection toolbar */
+.selection-toolbar {
   position: fixed;
   z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
   background-color: var(--bg-surface-elevated);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.2);
   user-select: none;
-  animation: tooltipFadeIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: selectionToolbarIn 0.12s ease-out;
 }
 
-@keyframes tooltipFadeIn {
+@keyframes selectionToolbarIn {
   from {
     opacity: 0;
     transform: translateY(4px) scale(0.97);
@@ -1017,71 +1021,109 @@ body {
   }
 }
 
-.tooltip-actions {
-  display: flex;
-  align-items: center;
-  padding: 4px;
-  gap: 3px;
-}
-
-.tooltip-btn {
+.selection-toolbar-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 9px;
+  gap: 6px;
+  padding: 6px 10px;
   background: transparent;
   border: none;
-  color: var(--text-primary);
-  font-size: 0.75rem;
-  font-weight: 600;
   border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 0.8125rem;
+  font-weight: 600;
   cursor: pointer;
   transition: background-color var(--transition), color var(--transition);
 }
 
-.tooltip-btn:hover {
+.selection-toolbar-btn:hover {
   background-color: var(--bg-inset);
   color: var(--primary);
 }
 
-.tooltip-divider {
-  width: 1px;
-  height: 14px;
-  background-color: var(--border-color);
-  margin: 0 1px;
+.selection-toolbar-btn-danger {
+  color: var(--accent-del-text);
 }
 
-/* Replace Popover Form */
-.tooltip-replace-form {
-  padding: 14px 16px;
-  width: 520px;
-  max-width: calc(100vw - 32px);
+.selection-toolbar-btn-danger:hover {
+  background-color: var(--accent-del-bg);
+  color: var(--accent-del-text);
+}
+
+.selection-toolbar-divider {
+  width: 1px;
+  height: 16px;
+  background-color: var(--border-color);
+  margin: 0 2px;
+}
+
+/* Centered modal overlay */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background-color: rgba(15, 23, 42, 0.5);
+}
+
+[data-theme="dark"] .modal-overlay {
+  background-color: rgba(0, 0, 0, 0.65);
+}
+
+.replace-dialog {
+  width: 560px;
+  max-width: 100%;
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  padding: 18px 20px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  animation: replaceDialogIn 0.15s ease-out;
 }
 
-.replace-form-header {
+@keyframes replaceDialogIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.replace-dialog-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
 }
 
-.replace-form-title {
+.replace-dialog-title {
   font-family: var(--font-heading);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
   font-weight: var(--font-weight-bold);
-  letter-spacing: var(--letter-spacing-wide);
-  color: var(--text-secondary);
+  letter-spacing: var(--letter-spacing-tight);
+  color: var(--text-primary);
 }
 
 .btn-ghost-icon {
   background: transparent;
   border: none;
   color: var(--text-muted);
-  font-size: 1.25rem;
+  font-size: 1.375rem;
   cursor: pointer;
-  padding: 0 4px;
+  padding: 0 6px;
   line-height: 1;
   border-radius: var(--radius-sm);
 }
@@ -1091,7 +1133,13 @@ body {
   background-color: var(--bg-inset);
 }
 
-.replace-textarea {
+.replace-dialog-meta {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.replace-dialog-textarea {
   width: 100%;
   padding: 10px 12px;
   border: 1px solid var(--border-color);
@@ -1104,60 +1152,32 @@ body {
   outline: none;
   resize: vertical;
   min-height: 140px;
-  max-height: 400px;
+  max-height: 40vh;
   tab-size: 2;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.replace-textarea:focus {
-  border-color: var(--border-color);
-  box-shadow: var(--shadow-md);
+.replace-dialog-textarea:focus {
+  border-color: var(--primary);
 }
 
-.replace-form-actions {
+.replace-dialog-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 8px;
 }
 
-.btn-primary-sm {
-  background-color: var(--primary);
-  color: var(--primary-text);
-  border: 1px solid transparent;
-  padding: 4px 10px;
-  font-family: var(--font-family);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: background-color var(--transition);
+.replace-dialog-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-align: right;
 }
 
-.btn-primary-sm:hover {
-  background-color: var(--primary-hover);
-}
-
-[data-theme="dark"] .btn-primary-sm {
-  font-weight: var(--font-weight-bold);
-}
-
-.btn-secondary-sm {
-  background: transparent;
-  border: 1px solid var(--border-color);
-  color: var(--text-secondary);
-  padding: 4px 8px;
-  font-family: var(--font-family);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: all var(--transition);
-}
-
-.btn-secondary-sm:hover {
-  background-color: var(--bg-inset);
-  border-color: var(--brand-400);
-  color: var(--primary);
+@media (prefers-reduced-motion: reduce) {
+  .selection-toolbar,
+  .replace-dialog {
+    animation: none;
+  }
 }

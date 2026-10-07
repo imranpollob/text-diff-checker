@@ -1,7 +1,7 @@
 /**
  * Diffchecker Application Controller
  * Handles user interactions, split view rendering (word & char diff), theme toggling,
- * diff computation, and in-diff selection tooltip (Copy & In-place Replace).
+ * diff computation, and the in-diff selection toolbar (Copy, Replace, Delete).
  */
 
 (function () {
@@ -43,22 +43,24 @@
   const diffOutput = document.getElementById('diffOutput');
   const toast = document.getElementById('toast');
 
-  // Selection Tooltip & Replace Popover Elements
-  const diffSelectionTooltip = document.getElementById('diffSelectionTooltip');
-  const tooltipActions = document.getElementById('tooltipActions');
-  const tooltipCopyBtn = document.getElementById('tooltipCopyBtn');
-  const tooltipReplaceBtn = document.getElementById('tooltipReplaceBtn');
-  const tooltipReplaceForm = document.getElementById('tooltipReplaceForm');
-  const replaceFormTitle = document.getElementById('replaceFormTitle');
-  const closeReplaceFormBtn = document.getElementById('closeReplaceFormBtn');
-  const replaceInput = document.getElementById('replaceInput');
-  const cancelReplaceBtn = document.getElementById('cancelReplaceBtn');
-  const confirmReplaceBtn = document.getElementById('confirmReplaceBtn');
+  // Selection toolbar & replace dialog elements
+  const selectionToolbar = document.getElementById('selectionToolbar');
+  const selectionCopyBtn = document.getElementById('selectionCopyBtn');
+  const selectionReplaceBtn = document.getElementById('selectionReplaceBtn');
+  const selectionDeleteBtn = document.getElementById('selectionDeleteBtn');
+  const modalOverlay = document.getElementById('modalOverlay');
+  const replaceDialogTitle = document.getElementById('replaceDialogTitle');
+  const replaceDialogMeta = document.getElementById('replaceDialogMeta');
+  const replaceDialogInput = document.getElementById('replaceDialogInput');
+  const closeReplaceDialogBtn = document.getElementById('closeReplaceDialogBtn');
+  const cancelReplaceDialogBtn = document.getElementById('cancelReplaceDialogBtn');
+  const confirmReplaceDialogBtn = document.getElementById('confirmReplaceDialogBtn');
 
   // Application State
   let activeMode = 'word'; // 'word' | 'char'
   let cachedDiff = null;
-  let currentSelectionInfo = null;
+  let pendingSelection = null; // resolved in-diff selection behind the toolbar
+  let activeEdit = null; // snapshot being edited in the replace dialog
 
   // Sample data designed to showcase Word vs Char diff, Wrap Lines, Blank lines, Whitespace, and Case settings
   const SAMPLE_ORIGINAL = `// Diffchecker Feature Showcase v1.0.0
@@ -133,7 +135,7 @@ const documentationNotice = "The billing service processes all transactions thro
   function init() {
     initTheme();
     bindEvents();
-    bindSelectionEvents();
+    bindSelectionToolbar();
     updateInputStats();
     updateWrapClass();
   }
@@ -234,249 +236,387 @@ const documentationNotice = "The billing service processes all transactions thro
     });
   }
 
-  // Selection Tooltip & In-place Replace Logic
-  function bindSelectionEvents() {
-    // Listen for text selections in diff output
-    document.addEventListener('mouseup', handleDiffTextSelection);
-    document.addEventListener('keyup', handleDiffTextSelection);
+  // In-diff selection toolbar (Copy / Replace / Delete) + centered replace dialog
+  function bindSelectionToolbar() {
+    // Evaluate after the user finishes selecting (mouse, keyboard, touch)
+    document.addEventListener('mouseup', evaluateDiffSelection);
+    document.addEventListener('keyup', evaluateDiffSelection);
+    document.addEventListener('touchend', evaluateDiffSelection);
 
-    // Copy from tooltip
-    tooltipCopyBtn.addEventListener('click', () => {
-      if (!currentSelectionInfo || !currentSelectionInfo.text) return;
-      navigator.clipboard.writeText(currentSelectionInfo.text)
-        .then(() => showToast('Copied to clipboard'))
-        .catch(() => showToast('Failed to copy'));
-      hideSelectionTooltip();
+    // Hide as soon as the selection stops being a valid in-diff selection
+    document.addEventListener('selectionchange', () => {
+      if (isReplaceDialogOpen()) return;
+      if (selectionToolbar.style.display === 'none') return;
+      if (!getDiffSelectionInfo()) hideSelectionToolbar();
     });
 
-    // Open Replace Form
-    tooltipReplaceBtn.addEventListener('click', () => {
-      if (!currentSelectionInfo) return;
-      tooltipActions.style.display = 'none';
-      tooltipReplaceForm.style.display = 'flex';
-      replaceFormTitle.textContent = currentSelectionInfo.pane === 'original' ? 'Replace in Original' : 'Replace in Changed';
-      replaceInput.value = currentSelectionInfo.text;
-      replaceInput.focus();
-      replaceInput.select();
-      repositionTooltip();
+    // Preserve the document selection while pressing toolbar buttons
+    selectionToolbar.addEventListener('mousedown', (e) => {
+      e.preventDefault();
     });
 
-    // Close / Cancel Replace Form
-    closeReplaceFormBtn.addEventListener('click', hideSelectionTooltip);
-    cancelReplaceBtn.addEventListener('click', hideSelectionTooltip);
+    selectionCopyBtn.addEventListener('click', copyPendingSelection);
+    selectionReplaceBtn.addEventListener('click', openReplaceDialog);
+    selectionDeleteBtn.addEventListener('click', deletePendingSelection);
 
-    // Confirm Replace
-    confirmReplaceBtn.addEventListener('click', executeReplacement);
+    closeReplaceDialogBtn.addEventListener('click', closeReplaceDialog);
+    cancelReplaceDialogBtn.addEventListener('click', closeReplaceDialog);
+    confirmReplaceDialogBtn.addEventListener('click', confirmReplaceDialog);
+    modalOverlay.addEventListener('mousedown', (e) => {
+      if (e.target === modalOverlay) closeReplaceDialog();
+    });
 
-    // Replace textarea key handling
-    replaceInput.addEventListener('keydown', (e) => {
+    replaceDialogInput.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
-        executeReplacement();
-      } else if (e.key === 'Escape') {
-        hideSelectionTooltip();
+        confirmReplaceDialog();
       }
     });
 
-    // Dismiss tooltip on click outside or escape
+    // Dismiss the toolbar on outside click, Escape, scroll, or resize
     document.addEventListener('mousedown', (e) => {
-      if (diffSelectionTooltip.style.display === 'none') return;
-      if (!diffSelectionTooltip.contains(e.target) && !diffOutput.contains(e.target)) {
-        hideSelectionTooltip();
-      }
+      if (selectionToolbar.style.display === 'none') return;
+      if (selectionToolbar.contains(e.target) || diffOutput.contains(e.target)) return;
+      hideSelectionToolbar();
     });
 
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        hideSelectionTooltip();
+      if (e.key !== 'Escape') return;
+      if (isReplaceDialogOpen()) {
+        closeReplaceDialog();
+      } else {
+        hideSelectionToolbar();
       }
     });
 
-    window.addEventListener('scroll', () => {
-      if (diffSelectionTooltip.style.display !== 'none' && tooltipReplaceForm.style.display === 'none') {
-        hideSelectionTooltip();
-      }
-    }, { passive: true });
+    window.addEventListener('scroll', hideSelectionToolbar, { passive: true, capture: true });
+    window.addEventListener('resize', hideSelectionToolbar);
   }
 
-  function handleDiffTextSelection(e) {
-    // If user is interacting inside the replace popup itself, ignore
-    if (diffSelectionTooltip.contains(e.target)) return;
+  function evaluateDiffSelection() {
+    if (isReplaceDialogOpen()) return;
+    const info = getDiffSelectionInfo();
+    if (!info) {
+      hideSelectionToolbar();
+      return;
+    }
+    pendingSelection = info;
+    showSelectionToolbar(info.rect);
+  }
 
+  // Resolve the current DOM selection to a source-text range, or null when the
+  // selection is unusable: collapsed, blank-only, outside the diff, spanning
+  // both panes, or touching placeholder rows. Range boundaries may sit in text
+  // nodes (drag/keyboard selection) or on elements (triple-click, select-all),
+  // and both shapes resolve to the touched source lines.
+  function getDiffSelectionInfo() {
     const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-      if (tooltipReplaceForm.style.display === 'none') {
-        hideSelectionTooltip();
-      }
-      return;
-    }
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
 
-    const selectedText = selection.toString();
-    if (!selectedText || selectedText.trim() === '') {
-      if (tooltipReplaceForm.style.display === 'none') {
-        hideSelectionTooltip();
-      }
-      return;
-    }
+    const text = selection.toString();
+    if (!text || text.trim() === '') return null;
 
     const range = selection.getRangeAt(0);
+    let startLineEl = getDiffLineElement(range.startContainer, range.startOffset, false);
+    let endLineEl = getDiffLineElement(range.endContainer, range.endOffset, true);
 
-    // Ensure selection is inside diffOutput and within one column
-    const leftCol = document.getElementById('splitLeftColumn');
-    const rightCol = document.getElementById('splitRightColumn');
-    if (!leftCol || !rightCol) return;
-
-    const isStartInLeft = leftCol.contains(range.startContainer);
-    const isEndInLeft = leftCol.contains(range.endContainer);
-    const isStartInRight = rightCol.contains(range.startContainer);
-    const isEndInRight = rightCol.contains(range.endContainer);
-
-    let pane = null;
-    if (isStartInLeft && isEndInLeft) {
-      pane = 'original';
-    } else if (isStartInRight && isEndInRight) {
-      pane = 'changed';
-    } else {
-      // Selection spans across columns or outside diff panes
-      hideSelectionTooltip();
-      return;
+    // Endpoints outside the mapped lines (e.g., triple-click on the last line
+    // ends at the next block after the diff) snap to the edge line of the
+    // resolved pane — unless the range genuinely spans both panes.
+    if (!startLineEl && endLineEl && !rangeTouchesPane(range, otherPaneOf(endLineEl))) {
+      startLineEl = edgeLineOfPane(endLineEl.dataset.pane, range.startContainer, range.startOffset, false);
     }
-
-    // Locate start and end line content elements
-    const startRowContent = getLineContentElement(range.startContainer);
-    const endRowContent = getLineContentElement(range.endContainer);
-
-    if (!startRowContent || !endRowContent) {
-      hideSelectionTooltip();
-      return;
+    if (!endLineEl && startLineEl && !rangeTouchesPane(range, otherPaneOf(startLineEl))) {
+      endLineEl = edgeLineOfPane(startLineEl.dataset.pane, range.endContainer, range.endOffset, true);
     }
+    if (!startLineEl || !endLineEl) return null;
 
-    const startLine = parseInt(startRowContent.dataset.lineNum, 10);
-    const endLine = parseInt(endRowContent.dataset.lineNum, 10);
+    const startPane = startLineEl.dataset.pane;
+    const endPane = endLineEl.dataset.pane;
+    if (!startPane || startPane !== endPane) return null;
 
-    if (isNaN(startLine) || isNaN(endLine)) {
-      hideSelectionTooltip();
-      return;
-    }
-
-    // Calculate exact character offsets within the starting and ending lines
-    const preStartRange = document.createRange();
-    preStartRange.selectNodeContents(startRowContent);
-    preStartRange.setEnd(range.startContainer, range.startOffset);
-    const startCharOffset = preStartRange.toString().length;
-
-    const preEndRange = document.createRange();
-    preEndRange.selectNodeContents(endRowContent);
-    preEndRange.setEnd(range.endContainer, range.endOffset);
-    const endCharOffset = preEndRange.toString().length;
+    const startLine = parseInt(startLineEl.dataset.lineNum, 10);
+    const endLine = parseInt(endLineEl.dataset.lineNum, 10);
+    if (!Number.isFinite(startLine) || !Number.isFinite(endLine)) return null;
 
     const rect = range.getBoundingClientRect();
-    if (rect.width === 0 && rect.height === 0) return;
+    if (rect.width === 0 && rect.height === 0) return null;
 
-    currentSelectionInfo = {
-      pane,
-      text: selectedText,
+    return {
+      pane: startPane,
+      text,
       startLine,
       endLine,
-      startCharOffset,
-      endCharOffset,
+      startChar: getBoundaryOffset(startLineEl, range.startContainer, range.startOffset),
+      endChar: getBoundaryOffset(endLineEl, range.endContainer, range.endOffset),
       rect
     };
-
-    showSelectionTooltip(rect);
   }
 
-  function getLineContentElement(node) {
+  // Find the mapped line touched by a range boundary. Text boundaries resolve
+  // to their containing line; element boundaries (boundary between child
+  // nodes) resolve to the line on the side the range extends toward.
+  function getDiffLineElement(node, offset, isEnd) {
     if (!node) return null;
+    if (node.nodeType === 3) {
+      return lineElementUp(node);
+    }
+    if (node.nodeType === 1) {
+      const kids = node.childNodes;
+      const after = offset < kids.length ? kids[offset] : null;
+      const before = offset > 0 ? kids[offset - 1] : null;
+      const ordered = isEnd ? [before, after] : [after, before];
+      for (const candidate of ordered) {
+        const lineEl = lineElementFrom(candidate, isEnd);
+        if (lineEl) return lineEl;
+      }
+      return lineElementFrom(node, isEnd);
+    }
+    return null;
+  }
+
+  // Nearest mapped line containing the node, or null (placeholder rows carry
+  // no line mapping and cannot be edited).
+  function lineElementUp(node) {
     const el = node.nodeType === 1 ? node : node.parentElement;
-    return el ? el.closest('.diff-line-content') : null;
+    if (!el || !diffOutput.contains(el)) return null;
+    const lineEl = el.closest('.diff-line-content');
+    if (!lineEl || !lineEl.dataset.lineNum || !lineEl.dataset.pane) return null;
+    return lineEl;
   }
 
-  function showSelectionTooltip(rect) {
-    tooltipActions.style.display = 'flex';
-    tooltipReplaceForm.style.display = 'none';
-    diffSelectionTooltip.style.display = 'block';
-
-    positionTooltipAtRect(rect);
-  }
-
-  function repositionTooltip() {
-    if (!currentSelectionInfo || !currentSelectionInfo.rect) return;
-    positionTooltipAtRect(currentSelectionInfo.rect);
-  }
-
-  function positionTooltipAtRect(rect) {
-    const tooltipRect = diffSelectionTooltip.getBoundingClientRect();
-    const tooltipWidth = tooltipRect.width || 140;
-    const tooltipHeight = tooltipRect.height || 36;
-
-    let top = rect.top - tooltipHeight - 8;
-    let left = rect.left + (rect.width / 2) - (tooltipWidth / 2);
-
-    // Keep within horizontal window bounds
-    if (left < 10) left = 10;
-    if (left + tooltipWidth > window.innerWidth - 10) {
-      left = window.innerWidth - tooltipWidth - 10;
+  // Line touched by a boundary-adjacent node: the containing line, else the
+  // edge line inside it (first for a start boundary, last for an end one).
+  function lineElementFrom(node, isEnd) {
+    if (!node) return null;
+    const up = lineElementUp(node);
+    if (up) return up;
+    if (node.nodeType === 1 && diffOutput.contains(node)) {
+      const lines = node.querySelectorAll('.diff-line-content[data-line-num][data-pane]');
+      if (lines.length > 0) return lines[isEnd ? lines.length - 1 : 0];
     }
+    return null;
+  }
 
-    // If too close to top of viewport, position below selection
-    if (top < 10) {
-      top = rect.bottom + 8;
+  function otherPaneOf(lineEl) {
+    return lineEl.dataset.pane === 'original' ? 'changed' : 'original';
+  }
+
+  function columnForPane(pane) {
+    return document.getElementById(pane === 'original' ? 'splitLeftColumn' : 'splitRightColumn');
+  }
+
+  function mappedLinesOf(pane) {
+    const col = columnForPane(pane);
+    return col ? [...col.querySelectorAll('.diff-line-content[data-line-num][data-pane]')] : [];
+  }
+
+  // True when the range intersects any mapped line of the given pane.
+  function rangeTouchesPane(range, pane) {
+    const lines = mappedLinesOf(pane);
+    for (const line of lines) {
+      const whole = document.createRange();
+      whole.selectNodeContents(line);
+      if (range.compareBoundaryPoints(Range.START_TO_END, whole) < 0 &&
+          range.compareBoundaryPoints(Range.END_TO_START, whole) > 0) {
+        return true;
+      }
     }
-
-    diffSelectionTooltip.style.top = `${top}px`;
-    diffSelectionTooltip.style.left = `${left}px`;
+    return false;
   }
 
-  function hideSelectionTooltip() {
-    diffSelectionTooltip.style.display = 'none';
-    tooltipReplaceForm.style.display = 'none';
-    tooltipActions.style.display = 'flex';
-    currentSelectionInfo = null;
+  // Edge line of a pane relative to a boundary point outside the lines: the
+  // first line at/after the point for a start boundary, the last line
+  // at/before it for an end boundary.
+  function edgeLineOfPane(pane, container, offset, isEnd) {
+    const lines = mappedLinesOf(pane);
+    if (lines.length === 0) return null;
+    const point = document.createRange();
+    point.setStart(container, offset);
+    point.collapse(true);
+    if (!isEnd) {
+      for (const line of lines) {
+        const whole = document.createRange();
+        whole.selectNodeContents(line);
+        if (point.compareBoundaryPoints(Range.START_TO_END, whole) <= 0) return line;
+      }
+      return null;
+    }
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const whole = document.createRange();
+      whole.selectNodeContents(lines[i]);
+      if (point.compareBoundaryPoints(Range.START_TO_START, whole) >= 0) return lines[i];
+    }
+    return null;
   }
 
-  function executeReplacement() {
-    if (!currentSelectionInfo) return;
+  // Character offset of a range boundary within its resolved line. Boundaries
+  // inside the line measure directly; boundaries outside it (element edges)
+  // snap to the nearer line edge.
+  function getBoundaryOffset(lineEl, container, offset) {
+    if (lineEl.contains(container)) {
+      const preRange = document.createRange();
+      preRange.selectNodeContents(lineEl);
+      preRange.setEnd(container, offset);
+      return preRange.toString().length;
+    }
+    const point = document.createRange();
+    point.setStart(container, offset);
+    point.collapse(true);
+    const wholeLine = document.createRange();
+    wholeLine.selectNodeContents(lineEl);
+    return point.compareBoundaryPoints(Range.START_TO_START, wholeLine) < 0
+      ? 0
+      : lineEl.textContent.length;
+  }
 
-    const replacement = replaceInput.value;
-    const { pane, startLine, endLine, startCharOffset, endCharOffset } = currentSelectionInfo;
+  function showSelectionToolbar(rect) {
+    selectionToolbar.style.display = 'flex';
 
-    const targetInput = pane === 'original' ? originalInput : changedInput;
-    const currentText = targetInput.value;
-    const lines = currentText.split('\n');
+    const toolbarRect = selectionToolbar.getBoundingClientRect();
+    const width = toolbarRect.width || 220;
+    const height = toolbarRect.height || 40;
 
-    if (startLine > lines.length || endLine > lines.length || startLine < 1 || endLine < 1) {
-      showToast('Could not locate line position');
-      hideSelectionTooltip();
+    let top = rect.top - height - 10;
+    let left = rect.left + rect.width / 2 - width / 2;
+
+    if (left < 8) left = 8;
+    if (left + width > window.innerWidth - 8) {
+      left = window.innerWidth - width - 8;
+    }
+    if (top < 8) top = rect.bottom + 10;
+
+    selectionToolbar.style.top = `${top}px`;
+    selectionToolbar.style.left = `${left}px`;
+  }
+
+  function hideSelectionToolbar() {
+    selectionToolbar.style.display = 'none';
+    pendingSelection = null;
+  }
+
+  function copyPendingSelection() {
+    if (!pendingSelection) return;
+    const text = pendingSelection.text;
+    hideSelectionToolbar();
+    copyTextToClipboard(text).then((ok) => {
+      showToast(ok ? 'Copied to clipboard' : 'Copy failed — press Ctrl+C to copy');
+    });
+  }
+
+  function copyTextToClipboard(text) {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      return navigator.clipboard.writeText(text)
+        .then(() => true)
+        .catch(() => legacyCopyToClipboard(text));
+    }
+    return Promise.resolve(legacyCopyToClipboard(text));
+  }
+
+  function legacyCopyToClipboard(text) {
+    try {
+      const helper = document.createElement('textarea');
+      helper.value = text;
+      helper.setAttribute('readonly', '');
+      helper.style.position = 'fixed';
+      helper.style.top = '0';
+      helper.style.opacity = '0';
+      document.body.appendChild(helper);
+      helper.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(helper);
+      return ok;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function deletePendingSelection() {
+    if (!pendingSelection) return;
+    const targetInput = pendingSelection.pane === 'original' ? originalInput : changedInput;
+    const label = pendingSelection.pane === 'original' ? 'Original' : 'Changed';
+    const count = pendingSelection.text.length;
+
+    const result = DiffEngine.applyLineRangeEdit(
+      targetInput.value,
+      pendingSelection.startLine,
+      pendingSelection.endLine,
+      pendingSelection.startChar,
+      pendingSelection.endChar,
+      ''
+    );
+
+    if (!result.ok) {
+      hideSelectionToolbar();
+      showToast('Could not delete — please re-select and try again');
       return;
     }
 
-    if (startLine === endLine) {
-      // Single line replacement
-      const lineIdx = startLine - 1;
-      const lineText = lines[lineIdx];
-      const before = lineText.slice(0, startCharOffset);
-      const after = lineText.slice(endCharOffset);
-      lines[lineIdx] = before + replacement + after;
-    } else {
-      // Multi-line replacement
-      const startIdx = startLine - 1;
-      const endIdx = endLine - 1;
-      const before = lines[startIdx].slice(0, startCharOffset);
-      const after = lines[endIdx].slice(endCharOffset);
-      const combined = before + replacement + after;
-      const newLines = combined.split('\n');
-      lines.splice(startIdx, endIdx - startIdx + 1, ...newLines);
-    }
-
-    targetInput.value = lines.join('\n');
+    targetInput.value = result.text;
     updateInputStats();
     invalidateCache();
-    hideSelectionTooltip();
-
-    // Auto-update comparison
+    hideSelectionToolbar();
     performDiff();
-    showToast(pane === 'original' ? 'Replaced in Original text' : 'Replaced in Changed text');
+    showToast(`Deleted ${count} character${count === 1 ? '' : 's'} from ${label}`);
+  }
+
+  function isReplaceDialogOpen() {
+    return modalOverlay.style.display !== 'none';
+  }
+
+  function openReplaceDialog() {
+    if (!pendingSelection) return;
+    activeEdit = pendingSelection;
+    hideSelectionToolbar();
+
+    replaceDialogTitle.textContent = activeEdit.pane === 'original' ? 'Replace in Original' : 'Replace in Changed';
+    const linesLabel = activeEdit.startLine === activeEdit.endLine
+      ? `Line ${activeEdit.startLine}`
+      : `Lines ${activeEdit.startLine}–${activeEdit.endLine}`;
+    replaceDialogMeta.textContent = `${linesLabel} · ${activeEdit.text.length} characters selected`;
+    replaceDialogInput.value = activeEdit.text;
+
+    modalOverlay.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    replaceDialogInput.focus();
+    replaceDialogInput.select();
+  }
+
+  function closeReplaceDialog() {
+    modalOverlay.style.display = 'none';
+    document.body.style.overflow = '';
+    activeEdit = null;
+  }
+
+  function confirmReplaceDialog() {
+    if (!activeEdit) {
+      closeReplaceDialog();
+      return;
+    }
+    const targetInput = activeEdit.pane === 'original' ? originalInput : changedInput;
+    const label = activeEdit.pane === 'original' ? 'Original' : 'Changed';
+
+    const result = DiffEngine.applyLineRangeEdit(
+      targetInput.value,
+      activeEdit.startLine,
+      activeEdit.endLine,
+      activeEdit.startChar,
+      activeEdit.endChar,
+      replaceDialogInput.value
+    );
+
+    if (!result.ok) {
+      closeReplaceDialog();
+      showToast('Could not replace — please re-select and try again');
+      return;
+    }
+
+    targetInput.value = result.text;
+    updateInputStats();
+    invalidateCache();
+    closeReplaceDialog();
+    performDiff();
+    showToast(`Replaced in ${label} text`);
   }
 
   function updateInputStats() {
@@ -499,7 +639,7 @@ const documentationNotice = "The billing service processes all transactions thro
     diffOutput.style.display = 'none';
     resultsHeader.style.display = 'none';
     diffOutput.innerHTML = '';
-    hideSelectionTooltip();
+    hideSelectionToolbar();
   }
 
   function switchMode(mode) {
@@ -602,6 +742,7 @@ const documentationNotice = "The billing service processes all transactions thro
 
   // Perform Diff Computation
   function performDiff() {
+    hideSelectionToolbar(); // rendered nodes (and any resolved range) are about to be replaced
     const textA = originalInput.value;
     const textB = changedInput.value;
 
@@ -628,6 +769,7 @@ const documentationNotice = "The billing service processes all transactions thro
   }
 
   function renderActiveView() {
+    hideSelectionToolbar(); // rendered nodes (and any resolved range) are about to be replaced
     if (!cachedDiff) {
       performDiff();
       return;
@@ -671,7 +813,8 @@ const documentationNotice = "The billing service processes all transactions thro
     `;
   }
 
-  // Render Split (Side-by-Side) View with intra-line word/char diffing & data-line attributes
+  // Render Split (Side-by-Side) View with intra-line word/char diffing.
+  // Content lines carry data-pane/data-line-num so in-diff selections map to source lines.
   function renderSplitView(rawLineEdits, options) {
     const alignedRows = DiffEngine.alignSplitDiff(rawLineEdits, options);
 
@@ -685,7 +828,7 @@ const documentationNotice = "The billing service processes all transactions thro
       if (row.left) {
         const rowClass = row.left.type === 'del' ? 'diff-row-del' : 'diff-row-equal';
         leftRowsHtml += `
-          <div class="diff-row ${rowClass}" data-pane="original" data-line-num="${row.left.lineNum}">
+          <div class="diff-row ${rowClass}">
             <div class="diff-gutter">${row.left.lineNum}</div>
             <div class="diff-line-content" data-pane="original" data-line-num="${row.left.lineNum}">${row.left.html || ' '}</div>
           </div>
@@ -703,7 +846,7 @@ const documentationNotice = "The billing service processes all transactions thro
       if (row.right) {
         const rowClass = row.right.type === 'add' ? 'diff-row-add' : 'diff-row-equal';
         rightRowsHtml += `
-          <div class="diff-row ${rowClass}" data-pane="changed" data-line-num="${row.right.lineNum}">
+          <div class="diff-row ${rowClass}">
             <div class="diff-gutter">${row.right.lineNum}</div>
             <div class="diff-line-content" data-pane="changed" data-line-num="${row.right.lineNum}">${row.right.html || ' '}</div>
           </div>

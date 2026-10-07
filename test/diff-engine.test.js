@@ -142,4 +142,82 @@ console.log('Running DiffEngine test suite...\n');
   console.log('✓ Test 8 Passed: Unicode & Emoji diffing');
 }
 
-console.log('\nAll 8 DiffEngine tests passed successfully! 🎉');
+// Test 9: Row line numbers always reference true source lines
+{
+  // Without options, numbers are plain 1..n on both sides
+  const edits = DiffEngine.computeLineDiff('a\nb\nc', 'a\nB\nc');
+  const rows = DiffEngine.alignSplitDiff(edits, { diffMode: 'word' });
+  assert.deepStrictEqual(rows.map(r => r.left.lineNum), [1, 2, 3]);
+  assert.deepStrictEqual(rows.map(r => r.right.lineNum), [1, 2, 3]);
+
+  // With ignoreBlankLines, numbers skip blanks instead of shifting
+  const textA = 'alpha\n\nbeta\n\n\ngamma';
+  const textB = 'alpha\n\nBETA\n\ngamma';
+  const editsBlank = DiffEngine.computeLineDiff(textA, textB, { ignoreBlankLines: true });
+  const rowsBlank = DiffEngine.alignSplitDiff(editsBlank, { ignoreBlankLines: true, diffMode: 'word' });
+  assert.strictEqual(rowsBlank.length, 3);
+  assert.deepStrictEqual(rowsBlank.map(r => r.left.lineNum), [1, 3, 6]);
+  assert.deepStrictEqual(rowsBlank.map(r => r.right.lineNum), [1, 3, 5]);
+  assert.strictEqual(rowsBlank[1].type, 'modified');
+  assert.strictEqual(rowsBlank[1].left.content, 'beta');
+  assert.strictEqual(rowsBlank[1].right.content, 'BETA');
+  console.log('✓ Test 9 Passed: Row line numbers reference true source lines');
+}
+
+// Test 10: applyLineRangeEdit replacements, deletions, and clamping
+{
+  const apply = DiffEngine.applyLineRangeEdit;
+
+  // Single-line replacement
+  assert.deepStrictEqual(
+    apply('hello world', 1, 1, 6, 11, 'there'),
+    { text: 'hello there', ok: true }
+  );
+
+  // Single-line deletion (empty replacement)
+  assert.deepStrictEqual(
+    apply('line1\nline2\nline3', 2, 2, 0, 5, ''),
+    { text: 'line1\n\nline3', ok: true }
+  );
+
+  // Multi-line replacement spanning three lines
+  assert.deepStrictEqual(
+    apply('aaXX\nYYYY\nZZbb', 1, 3, 2, 2, '12\n34'),
+    { text: 'aa12\n34bb', ok: true }
+  );
+
+  // Multi-line deletion keeps surrounding text joined
+  assert.deepStrictEqual(
+    apply('aaXX\nYYYY\nZZbb', 1, 3, 2, 2, ''),
+    { text: 'aabb', ok: true }
+  );
+
+  // Offsets past end-of-line are clamped, never crash
+  assert.deepStrictEqual(
+    apply('ab', 1, 1, 0, 99, 'AB'),
+    { text: 'AB', ok: true }
+  );
+
+  // Reversed single-line offsets degrade to an insertion
+  assert.deepStrictEqual(
+    apply('abcd', 1, 1, 3, 1, 'X'),
+    { text: 'abcXd', ok: true }
+  );
+
+  // Out-of-range lines fail closed with the original text
+  assert.deepStrictEqual(
+    apply('a\nb', 0, 1, 0, 1, 'X'),
+    { text: 'a\nb', ok: false }
+  );
+  assert.deepStrictEqual(
+    apply('a\nb', 1, 3, 0, 1, 'X'),
+    { text: 'a\nb', ok: false }
+  );
+  assert.deepStrictEqual(
+    apply('a\nb', 2, 1, 0, 1, 'X'),
+    { text: 'a\nb', ok: false }
+  );
+  console.log('✓ Test 10 Passed: applyLineRangeEdit replacements, deletions, and clamping');
+}
+
+console.log('\nAll 10 DiffEngine tests passed successfully! 🎉');
